@@ -1,0 +1,17 @@
+{
+  "comments": [],
+  "issues": [
+    {
+      "description": "Use this as the first local non-Linear Symphony task. Start by checking out the Cauldron repo in the Symphony workspace, inspect the current branch and tests, then make only a harmless documentation or status-note change if needed to prove the workflow is operating end to end.",
+      "id": "cauldron-local-1",
+      "identifier": "CAULDRON-LOCAL-1",
+      "labels": [
+        "cauldron",
+        "local"
+      ],
+      "priority": 1,
+      "state": "Todo",
+      "title": "Smoke-test local Symphony orchestration against Cauldron"
+    }
+  ]
+}
