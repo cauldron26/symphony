@@ -5,6 +5,7 @@ defmodule SymphonyElixir.ExtensionsTest do
   import Phoenix.LiveViewTest
 
   alias SymphonyElixir.Linear.Adapter
+  alias SymphonyElixir.Tracker.Local
   alias SymphonyElixir.Tracker.Memory
 
   @endpoint SymphonyElixirWeb.Endpoint
@@ -203,6 +204,56 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "linear")
     assert SymphonyElixir.Tracker.adapter() == Adapter
+  end
+
+  test "local tracker reads and updates a JSON board file" do
+    board_path = Path.join(System.tmp_dir!(), "symphony-local-board-#{System.unique_integer([:positive])}.json")
+    on_exit(fn -> File.rm(board_path) end)
+
+    File.write!(
+      board_path,
+      Jason.encode!(%{
+        "issues" => [
+          %{
+            "id" => "local-1",
+            "identifier" => "LOCAL-1",
+            "title" => "Use local tasks",
+            "description" => "No Linear required",
+            "state" => "Todo",
+            "priority" => 1,
+            "labels" => ["Cauldron"]
+          },
+          %{
+            "id" => "local-2",
+            "identifier" => "LOCAL-2",
+            "title" => "Closed task",
+            "state" => "Done"
+          }
+        ]
+      })
+    )
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "local",
+      tracker_path: board_path
+    )
+
+    assert Config.settings!().tracker.path == board_path
+    assert SymphonyElixir.Tracker.adapter() == Local
+
+    assert {:ok, [%Issue{id: "local-1", identifier: "LOCAL-1", labels: ["cauldron"]}]} =
+             SymphonyElixir.Tracker.fetch_candidate_issues()
+
+    assert :ok = SymphonyElixir.Tracker.create_comment("local-1", "local comment")
+    assert :ok = SymphonyElixir.Tracker.update_issue_state("local-1", "In Progress")
+
+    updated_board = board_path |> File.read!() |> Jason.decode!()
+
+    assert [%{"issue_id" => "local-1", "body" => "local comment", "created_at" => _}] =
+             Map.fetch!(updated_board, "comments")
+
+    assert %{"state" => "In Progress", "updated_at" => _} =
+             Enum.find(Map.fetch!(updated_board, "issues"), &(&1["id"] == "local-1"))
   end
 
   test "linear adapter delegates reads and validates mutation responses" do

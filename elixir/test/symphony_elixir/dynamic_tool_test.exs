@@ -3,23 +3,37 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
 
   alias SymphonyElixir.Codex.DynamicTool
 
-  test "tool_specs advertises the linear_graphql input contract" do
-    assert [
-             %{
-               "description" => description,
-               "inputSchema" => %{
-                 "properties" => %{
-                   "query" => _,
-                   "variables" => _
-                 },
-                 "required" => ["query"],
-                 "type" => "object"
+  test "tool_specs advertises the dynamic tool input contracts" do
+    specs = DynamicTool.tool_specs()
+
+    assert %{
+             "description" => description,
+             "inputSchema" => %{
+               "properties" => %{
+                 "query" => _,
+                 "variables" => _
                },
-               "name" => "linear_graphql"
-             }
-           ] = DynamicTool.tool_specs()
+               "required" => ["query"],
+               "type" => "object"
+             },
+             "name" => "linear_graphql"
+           } = Enum.find(specs, &(&1["name"] == "linear_graphql"))
 
     assert description =~ "Linear"
+
+    assert %{
+             "inputSchema" => %{
+               "properties" => %{
+                 "action" => _,
+                 "issue_id" => _,
+                 "body" => _,
+                 "state" => _
+               },
+               "required" => ["action"],
+               "type" => "object"
+             },
+             "name" => "local_tracker"
+           } = Enum.find(specs, &(&1["name"] == "local_tracker"))
   end
 
   test "unsupported tools return a failure payload with the supported tool list" do
@@ -30,7 +44,7 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
     assert Jason.decode!(response["output"]) == %{
              "error" => %{
                "message" => ~s(Unsupported dynamic tool: "not_a_real_tool".),
-               "supportedTools" => ["linear_graphql"]
+               "supportedTools" => ["linear_graphql", "local_tracker"]
              }
            }
 
@@ -306,5 +320,63 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
 
     assert response["success"] == true
     assert response["output"] == ":ok"
+  end
+
+  test "local_tracker lists, comments, and updates local board issues" do
+    board_path = Path.join(System.tmp_dir!(), "symphony-dynamic-local-board-#{System.unique_integer([:positive])}.json")
+    on_exit(fn -> File.rm(board_path) end)
+
+    File.write!(
+      board_path,
+      Jason.encode!(%{
+        "issues" => [
+          %{
+            "id" => "issue-1",
+            "identifier" => "LOC-1",
+            "title" => "Local tracker dynamic tool",
+            "description" => "Exercise the dynamic tool",
+            "state" => "Todo"
+          }
+        ],
+        "comments" => []
+      })
+    )
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "local",
+      tracker_path: board_path
+    )
+
+    list_response = DynamicTool.execute("local_tracker", %{"action" => "list_issues"})
+
+    assert list_response["success"] == true
+
+    assert %{
+             "issues" => [
+               %{
+                 "id" => "issue-1",
+                 "identifier" => "LOC-1",
+                 "title" => "Local tracker dynamic tool",
+                 "state" => "Todo"
+               }
+             ]
+           } = Jason.decode!(list_response["output"])
+
+    assert DynamicTool.execute("local_tracker", %{
+             "action" => "comment",
+             "issue_id" => "issue-1",
+             "body" => "finished"
+           })["success"] == true
+
+    assert DynamicTool.execute("local_tracker", %{
+             "action" => "update_state",
+             "issue_id" => "issue-1",
+             "state" => "Done"
+           })["success"] == true
+
+    board = board_path |> File.read!() |> Jason.decode!()
+
+    assert [%{"issue_id" => "issue-1", "body" => "finished"}] = board["comments"]
+    assert [%{"state" => "Done"}] = board["issues"]
   end
 end
